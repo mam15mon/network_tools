@@ -1,0 +1,87 @@
+sys
+interface GigabitEthernet1/0
+ ip address {{ ip }} 255.255.255.0
+ quit
+
+line vty 0 63
+ authentication-mode scheme
+ user-role network-operator
+ quit
+
+ip route-static 0.0.0.0 0 {{ gateway }}
+
+ssh server enable
+
+local-user {{ vsr_username }} class manage
+ password simple {{ vsr_password }}
+ service-type ssh
+ authorization-attribute user-role level-15
+ authorization-attribute user-role network-operator
+ quit
+
+local-user {{ monitor_username }} class manage
+ password simple {{ monitor_password }}
+ service-type ssh
+ authorization-attribute user-role network-operator
+ quit
+
+local-user {{ ppp_username }} class network
+ password simple {{ ppp_password }}
+ service-type ppp
+ authorization-attribute user-role network-operator
+ quit
+
+clock timezone 8 add 08:00:00
+clock protocol ntp
+
+ip pool 1 {{ start_ip }} {{ end_ip }}
+ip pool 1 gateway {{ pool_ip_gateway }}
+ppp access-user log enable successful-login failed-login normal-logout abnormal-logout
+
+interface Virtual-Template1
+ undo enable log updown
+{% if radius_ip %}
+ ppp authentication-mode chap domain imc
+{% else %}
+ ppp authentication-mode chap domain system
+{% endif %}
+ remote address pool 1
+ ppp account-statistics enable
+ tcp mss 1000
+ quit
+
+l2tp-group 1 mode lns
+ allow l2tp virtual-template 1
+ undo tunnel authentication
+ tunnel name lns
+ quit
+
+l2tp virtual-template 1 va-pool 6000
+l2tp enable
+
+{% if radius_ip %}
+radius scheme imc
+ primary authentication {{ radius_ip }}
+ primary accounting {{ radius_ip }}
+ accounting-on enable interval 15
+ key authentication simple {{ radius_password }}
+ key accounting simple {{ radius_password }}
+ timer realtime-accounting 3
+ user-name-format without-domain
+ quit
+
+domain imc
+ authorization-attribute ip-pool 1
+ authentication ppp radius-scheme imc
+ authorization ppp radius-scheme imc
+ accounting ppp radius-scheme imc
+ quit
+
+domain default enable imc
+
+interface Virtual-Template1
+  ppp authentication-mode chap domain imc
+  quit
+quit
+save force
+{% endif %}
