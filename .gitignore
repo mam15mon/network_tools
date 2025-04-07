@@ -1,5 +1,6 @@
 build.py
 installer.nsi
 NetworkTools.spec
+dist/
 export/
 resources/
