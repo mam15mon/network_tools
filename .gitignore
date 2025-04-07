@@ -3,3 +3,5 @@ installer.nsi
 NetworkTools.spec
 dist/
 export/
+__pycache__/
+*.egg-info/

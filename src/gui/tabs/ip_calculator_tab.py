@@ -67,67 +67,144 @@ class IPCalculatorTab(QWidget):
         self.query_button.setText("查询中...")
         
         try:
-            # 使用 ip.sb 判断IP归属地
-            ip_sb_url = f"https://api.ip.sb/geoip/{ip}"
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-            check_response = requests.get(ip_sb_url, timeout=5, headers=headers)
-            check_data = check_response.json()
+            data_source = None
+            fields = None
             
-            print("ip.sb API响应:")
-            print(check_data)
+            # 尝试多个API，按优先级顺序
+            apis = [
+                {
+                    'url': f'https://realip.cc/?ip={ip}',
+                    'handler': lambda data: {
+                        'fields': {
+                            'ip': 'IP地址',
+                            'country': '国家',
+                            'province': '省份',
+                            'city': '城市',
+                            'isp': '运营商',
+                            'time_zone': '时区',
+                            'latitude': '纬度',
+                            'longitude': '经度'
+                        },
+                        'data': {
+                            'ip': data['ip'],
+                            'country': data['country'],
+                            'province': data['province'],
+                            'city': data['city'],
+                            'isp': data['isp'],
+                            'time_zone': data['time_zone'],
+                            'latitude': data['latitude'],
+                            'longitude': data['longitude']
+                        }
+                    }
+                },
+                {
+                    'url': f'https://api.ip.sb/geoip/{ip}',
+                    'handler': lambda data: {
+                        'fields': {
+                            'ip': 'IP地址',
+                            'country': '国家',
+                            'region': '地区',
+                            'city': '城市',
+                            'isp': '运营商',
+                            'timezone': '时区',
+                            'latitude': '纬度',
+                            'longitude': '经度'
+                        },
+                        'data': {
+                            'ip': data['ip'],
+                            'country': data['country'],
+                            'region': data['region'],
+                            'city': data['city'],
+                            'isp': data['isp'],
+                            'timezone': data['timezone'],
+                            'latitude': data['latitude'],
+                            'longitude': data['longitude']
+                        }
+                    }
+                },
+                {
+                    'url': f'https://api.ip2location.io/?ip={ip}',
+                    'handler': lambda data: {
+                        'fields': {
+                            'ip': 'IP地址',
+                            'country_name': '国家',
+                            'region_name': '地区',
+                            'city_name': '城市',
+                            'time_zone': '时区',
+                            'latitude': '纬度',
+                            'longitude': '经度'
+                        },
+                        'data': {
+                            'ip': data['ip'],
+                            'country_name': data['country_name'],
+                            'region_name': data['region_name'],
+                            'city_name': data['city_name'],
+                            'time_zone': data['time_zone'],
+                            'latitude': data['latitude'],
+                            'longitude': data['longitude']
+                        }
+                    }
+                },
+                {
+                    'url': f'https://whois.pconline.com.cn/ipJson.jsp?ip={ip}&json=true',
+                    'handler': lambda data: {
+                        'fields': {
+                            'ip': 'IP地址',
+                            'addr': '地理位置',
+                            'pro': '省份',
+                            'city': '城市',
+                            'region': '地区'
+                        },
+                        'data': {
+                            'ip': data['ip'],
+                            'addr': data['addr'],
+                            'pro': data['pro'],
+                            'city': data['city'],
+                            'region': data['region']
+                        }
+                    }
+                }
+            ]
             
-            is_china_ip = check_data.get('country_code') == 'CN'
+            for api in apis:
+                try:
+                    response = requests.get(api['url'], headers=headers, timeout=5)
+                    if response.status_code == 200:
+                        data = response.json()
+                        print(f"\n{api['url']} API响应:")
+                        print(data)
+                        result = api['handler'](data)
+                        fields = result['fields']
+                        data_source = result['data']
+                        break
+                except Exception as e:
+                    print(f"API {api['url']} 调用失败: {str(e)}")
+                    continue
             
-            if is_china_ip:
-                # 使用国内API (api.vore.top)
-                vore_url = f"https://api.vore.top/api/IPdata?ip={ip}"
-                response = requests.get(vore_url, timeout=5)
-                data = response.json()
-                
-                print("\nvore.top API响应:")
-                print(data)
-                
-                if data.get('code') == 200:
-                    ipdata = data['ipdata']
-                    adcode = data['adcode']
+            # 所有API都失败时使用ip2region本地查询
+            if not data_source:
+                from XdbSearchIP import XdbSearcher
+                db_path = 'resources/ip2region.xdb'
+                try:
+                    # 使用文件缓存方式查询
+                    searcher = XdbSearcher(dbfile=db_path)
+                    region_str = searcher.searchByIPStr(ip)
                     fields = {
-                        "text": "IP地址",
-                        "location": "地理位置",
-                        "info1": "省份",
-                        "info2": "城市",
-                        "isp": "运营商",
-                        "asn_number": "AS编号"
+                        'ip': 'IP地址',
+                        'region': '地理位置'
                     }
                     data_source = {
-                        "text": data['ipinfo']['text'],
-                        "location": adcode['o'],
-                        "info1": ipdata['info1'],
-                        "info2": ipdata['info2'],
-                        "isp": ipdata['isp'],
-                        "asn_number": f"AS{check_data.get('asn', '')}"
+                        'ip': ip,
+                        'region': region_str
                     }
-                else:
-                    raise Exception("API返回错误")
-            else:
-                # 直接使用已经获取到的 ip.sb 数据
-                fields = {
-                    "ip": "IP地址",
-                    "country": "国家/地区",
-                    "isp": "运营商",
-                    "organization": "所属组织",
-                    "asn_number": "AS编号",
-                    "asn_organization": "AS组织",
-                    "timezone": "时区"
-                }
-                data_source = {
-                    "ip": check_data['ip'],
-                    "country": check_data['country'],
-                    "isp": check_data.get('isp', ''),
-                    "organization": check_data.get('organization', ''),
-                    "asn_number": f"AS{check_data.get('asn', '')}",
-                    "asn_organization": check_data.get('asn_organization', ''),
-                    "timezone": check_data.get('timezone', '')
-                }
+                    print("\n使用ip2region本地查询:")
+                    print(data_source)
+                except Exception as e:
+                    print(f"ip2region查询失败: {str(e)}")
+                    raise
+                finally:
+                    searcher.close()
             
             print("\n最终使用的数据源:")
             print(data_source)
