@@ -5,3 +5,5 @@ dist/
 export/
 __pycache__/
 *.egg-info/
+*.exe
+*.zip
