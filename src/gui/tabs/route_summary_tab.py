@@ -82,33 +82,30 @@ class RouteSummaryTab(QWidget):
         try:
             original_inputs = []
             ip_networks = []
-            total_original_entries = len(networks)
+            total_original_ips = 0
             original_ip_map = {}
             ip32_to_original = {}
 
             for net in networks:
                 if isinstance(net, IPRange):
+                    total_original_ips += net.last - net.first + 1
                     range_str = f"{IPAddress(net.first)}-{IPAddress(net.last)}"
                     original_inputs.append(range_str)
                     
-                    range_networks = []
-                    for ip in range(net.first, net.last + 1):
-                        ip_net = IPNetwork(f"{IPAddress(ip)}/32")
-                        ip_networks.append(ip_net)
-                        range_networks.append(ip_net)
-                        ip32_to_original[str(ip_net)] = range_str
-                    
-                    original_ip_map[range_str] = range_networks
+                    # 直接将IPRange转换为CIDR块
+                    ip_networks.extend(IPNetwork(f"{IPAddress(ip)}/{32}") for ip in range(net.first, net.last + 1))
+                    ip32_to_original[range_str] = [IPNetwork(f"{IPAddress(ip)}/{32}") for ip in range(net.first, net.last + 1)]
                 else:
+                    total_original_ips += 1
                     original_inputs.append(str(net))
                     ip_networks.append(net)
                     original_ip_map[str(net)] = [net]
-            
+                
             summarized = cidr_merge(ip_networks)
             
             # 更新统计信息
             self.stats_label.setText(
-                f"原始路由条目数: {total_original_entries} | "
+                f"原始IP数量: {total_original_ips:,} | "
                 f"汇总后路由条目数: {len(summarized)}"
             )
             
@@ -125,7 +122,7 @@ class RouteSummaryTab(QWidget):
                         contained_networks.add(ip32_to_original[str(ip_net)])
                     elif ip_net in network:
                         contained_networks.add(str(ip_net))
-                
+                    
                 # 包含的原始网段列
                 count_text = f"{len(contained_networks)} 个原始网段"
                 details = "包含以下原始网段:\n" + "\n".join(
@@ -140,80 +137,6 @@ class RouteSummaryTab(QWidget):
             import traceback
             print(traceback.format_exc())
             self.show_error(f"汇总错误: {str(e)}")
-
-    def perform_inexact_summary(self, networks):
-        """执行非精确汇总"""
-        try:
-            # 找到最小和最大IP地址
-            min_ip = min(net.first if isinstance(net, IPRange) else net.first for net in networks)
-            max_ip = max(net.last if isinstance(net, IPRange) else net.last for net in networks)
-            
-            # 计算掩码长度
-            diff = max_ip ^ min_ip
-            prefix_len = 32 - diff.bit_length()
-            
-            # 创建包含所有IP的最小网络
-            summary_net = IPNetwork(f"{str(IPAddress(min_ip))}/{prefix_len}")
-            
-            # 计算原始IP集合
-            original_ips = set()
-            for net in networks:
-                if isinstance(net, IPRange):
-                    original_ips.update(range(net.first, net.last + 1))
-                else:
-                    original_ips.update(range(net.first, net.last + 1))
-            
-            # 计算汇总网段的所有IP
-            summary_ips = set(range(summary_net.first, summary_net.last + 1))
-            
-            # 计算额外包含的IP
-            extra_ips = summary_ips - original_ips
-            
-            # 将额外IP转换为范围
-            extra_ranges = []
-            if extra_ips:
-                sorted_ips = sorted(extra_ips)
-                start = sorted_ips[0]
-                prev = start
-                for curr in sorted_ips[1:] + [None]:
-                    if curr is None or curr != prev + 1:
-                        if start == prev:
-                            extra_ranges.append(str(IPAddress(start)))
-                        else:
-                            extra_ranges.append(f"{IPAddress(start)}-{IPAddress(prev)}")
-                        if curr is not None:
-                            start = curr
-                    prev = curr
-            
-            # 更新统计信息
-            self.stats_label.setText(
-                f"原始IP数量: {len(original_ips):,} | "
-                f"汇总后IP数量: {len(summary_ips):,} | "
-                f"额外包含IP数量: {len(extra_ips):,} "
-                f"({(len(extra_ips)/len(summary_ips)*100):.2f}%)"
-            )
-            
-            # 更新结果表格
-            self.result_table.setRowCount(1)
-            self.result_table.setItem(0, 0, QTableWidgetItem(str(summary_net)))
-            
-            # 添加额外包含的IP范围信息
-            if extra_ranges:
-                details = "额外包含以下IP范围:\n" + "\n".join(f"• {r}" for r in extra_ranges)
-                count_text = f"{len(extra_ips)} 个额外IP"
-            else:
-                details = "无额外包含的IP"
-                count_text = "无额外IP"
-            
-            details_item = QTableWidgetItem(count_text)
-            details_item.setToolTip(details)
-            self.result_table.setItem(0, 1, details_item)
-
-        except Exception as e:
-            print(f"非精确汇总出错: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
-            self.show_error(f"非精确汇总错误: {str(e)}")
 
     def summarize_routes(self):
         """根据选择的模执行路由汇总"""

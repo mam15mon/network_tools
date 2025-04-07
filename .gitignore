@@ -3,4 +3,3 @@ installer.nsi
 NetworkTools.spec
 dist/
 export/
-resources/
