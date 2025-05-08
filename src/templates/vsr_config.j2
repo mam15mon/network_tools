@@ -1,0 +1,119 @@
+#配置IP地址
+sys
+interface GigabitEthernet1/0
+ ip address {{ ip }} 255.255.255.0
+
+#配置vty登录方式
+line vty 0 63
+ authentication-mode scheme
+ user-role network-operator
+
+#配置路由
+ip route-static 0.0.0.0 0 {{ gateway }}
+#打开SSH功能
+ssh server enable
+
+{% if vsr_username %}
+#配置本地管理员用户
+local-user {{ vsr_username }} class manage
+ password simple {{ vsr_password }}
+ service-type ssh
+ authorization-attribute user-role level-15
+ authorization-attribute user-role network-operator
+{% endif %}
+
+{% if monitor_username %}
+#配置监控用户
+local-user {{ monitor_username }} class manage
+ password simple {{ monitor_password }}
+ service-type ssh
+ authorization-attribute user-role network-operator
+{% endif %}
+
+{% if ppp_username %}
+#配置本地ppp用户
+local-user {{ ppp_username }} class network
+ password simple {{ ppp_password }}
+ service-type ppp
+ authorization-attribute user-role network-operator
+{% endif %}
+
+#设置时钟和时区
+clock timezone 8 add 08:00:00
+clock protocol ntp
+#配置地址池
+ip pool 1 {{ start_ip }} {{ end_ip }}
+ip pool 1 gateway {{ pool_ip_gateway }}
+#配置PPP的log
+ppp access-user log enable successful-login failed-login normal-logout abnormal-logout
+
+#配置vt口默认domain
+interface Virtual-Template1
+ undo enable log updown
+ ppp authentication-mode chap domain system
+ remote address pool 1
+ ppp account-statistics enable
+ tcp mss 1000
+
+#配置L2TP
+l2tp-group 1 mode lns
+ allow l2tp virtual-template 1
+ undo tunnel authentication
+ tunnel name lns
+
+#配置L2TP的IP地址池
+l2tp virtual-template 1 va-pool 6000
+l2tp enable
+
+{% if ldap_server_ip %}
+#配置LDAP认证
+ldap server ldap-server
+ login-dn {{ ldap_login_dn }}
+ search-base-dn {{ ldap_search_base_dn }}
+ ip {{ ldap_server_ip }}
+ login-password simple {{ ldap_password }}
+ user-parameters user-object-class posixaccount
+ user-parameters user-name-attribute uid
+
+ldap scheme ldap-scheme
+ authentication-server ldap-server
+
+domain imc
+ authentication ppp ldap-scheme ldap-scheme
+ authorization ppp none
+ accounting ppp none
+ authorization-attribute ip-pool 1
+
+
+domain default enable imc
+
+interface Virtual-Template1
+  ppp authentication-mode pap domain imc
+
+{% endif %}
+
+{% if radius_ip %}
+#配置Radius认证
+radius scheme imc
+ primary authentication {{ radius_ip }}
+ primary accounting {{ radius_ip }}
+ accounting-on enable interval 15
+ key authentication simple {{ radius_password }}
+ key accounting simple {{ radius_password }}
+ timer realtime-accounting 3
+ user-name-format without-domain
+
+
+domain imc
+ authorization-attribute ip-pool 1
+ authentication ppp radius-scheme imc
+ authorization ppp radius-scheme imc
+ accounting ppp radius-scheme imc
+
+
+domain default enable imc
+
+interface Virtual-Template1
+  ppp authentication-mode chap domain imc
+
+{% endif %}
