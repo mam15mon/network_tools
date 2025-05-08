@@ -1,5 +1,6 @@
 # 标准库导入
 import glob
+import json
 import os
 import shutil
 import subprocess
@@ -29,27 +30,58 @@ def clean_build_files() -> None:
             print(f"   删除缓存: {cache_dir}")
             shutil.rmtree(cache_dir)
 
+def normalize_package_name(name):
+    """标准化包名，处理常见的格式差异"""
+    # 转换为小写
+    name = name.lower()
+    # 替换下划线为连字符（PyPI通常使用连字符，但有些包使用下划线）
+    name = name.replace('_', '-')
+    # 移除常见的包名前缀
+    prefixes = ['python-']
+    for prefix in prefixes:
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+    return name
+
 def parse_requirement(req_str):
     """解析需求字符串，分离包名和版本信息"""
-    parts = req_str.split('==')
-    if len(parts) > 1:
-        return parts[0].lower(), parts[1]
-    return req_str.lower(), None
+    # 处理各种版本说明符: ==, >=, <=, >, <, ~=, !=
+    for operator in ['==', '>=', '<=', '>', '<', '~=', '!=']:
+        if operator in req_str:
+            parts = req_str.split(operator, 1)
+            return normalize_package_name(parts[0].strip()), parts[1].strip()
+
+    # 没有版本说明符
+    return normalize_package_name(req_str.strip()), None
 
 def get_installed_packages() -> Dict[str, str]:
     """获取已安装的包列表"""
-    output = subprocess.check_output([
-        sys.executable,
-        "-m",
-        "pip",
-        "list"
-    ]).decode().split('\n')
+    try:
+        # 使用pip list --format=json获取更准确的包信息
+        output = subprocess.check_output([
+            sys.executable,
+            "-m",
+            "pip",
+            "list",
+            "--format=json"
+        ]).decode()
 
-    return {
-        line.split()[0].lower(): line.split()[1]
-        for line in output[2:]
-        if len(line.split()) >= 2
-    }
+        packages = json.loads(output)
+        return {normalize_package_name(pkg['name']): pkg['version'] for pkg in packages}
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        # 如果JSON格式不可用，回退到文本解析
+        output = subprocess.check_output([
+            sys.executable,
+            "-m",
+            "pip",
+            "list"
+        ]).decode().split('\n')
+
+        return {
+            normalize_package_name(line.split()[0]): line.split()[1]
+            for line in output[2:]
+            if len(line.split()) >= 2
+        }
 
 def install_package(package: str) -> None:
     """安装指定的包"""
