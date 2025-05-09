@@ -248,29 +248,32 @@ def verify_and_convert_icon() -> str:
 
 def get_pyinstaller_args() -> List[str]:
     """获取 PyInstaller 参数列表"""
-    # 基本参数
+    # 基本参数 - 添加额外优化选项
     args = [
         'src/main.py',  # 主程序文件
         '--name=network_tools',  # 英文名称
         '--windowed',  # 无控制台窗口
         '--noconfirm',  # 覆盖现有文件
         '--clean',  # 清理临时文件
-        # '--onedir',  # 生成目录而不是单个文件，便于调试
         '--onefile',  # 生成单个exe文件
-        '--log-level=INFO',  # 日志级别
+        '--log-level=WARN',  # 减少日志输出
+        '--optimize=2',  # 使用Python优化
     ]
 
     # 检查是否可以使用UPX
     if shutil.which('upx') or os.path.exists('upx/upx.exe'):
-        # UPX压缩设置 - 注意：不使用--upx选项，因为它在新版本中可能有歧义
-        # 只要指定了--upx-dir，PyInstaller就会尝试使用UPX
+        # 使用最高级别的UPX压缩设置
+        upx_path = os.path.dirname(shutil.which('upx')) if shutil.which('upx') else os.path.abspath('upx')
         args.extend([
-            '--upx-exclude=vcruntime140.dll',  # 排除特定文件不压缩
-            '--upx-exclude=python*.dll',
-            '--upx-exclude=ucrtbase.dll',
-            '--upx-exclude=VCRUNTIME140.dll',
-            '--upx-exclude=msvcp140.dll',
+            f'--upx-dir={upx_path}',  # 指定UPX目录
+            # 排除无法压缩的文件
+            '--upx-exclude=vcruntime140.dll',
+            '--upx-exclude=python3.dll',
+            '--upx-exclude=libcrypto-*.dll',
+            '--upx-exclude=libssl-*.dll',
         ])
+        # 设置UPX命令行选项 - 使用更保守的压缩设置以避免错误
+        os.environ['UPX_OPTS'] = '--best --lzma'
     else:
         # 如果没有UPX，明确禁用它
         args.append('--noupx')
@@ -294,45 +297,41 @@ def get_pyinstaller_args() -> List[str]:
         '--collect-all=requests',
     ])
 
-    # 添加调试选项
+    # 移除调试选项，减小文件大小
+    # args.extend([
+    #     '--debug=imports',  # 调试导入问题
+    #     '--debug=bootloader',  # 调试启动加载器
+    # ])
+
+    # 添加优化选项
     args.extend([
-        '--debug=imports',  # 调试导入问题
-        '--debug=bootloader',  # 调试启动加载器
+        '--strip',  # 移除调试符号
     ])
 
-    # 显式导入关键模块
+    # 显式导入关键模块 - 极简版本
     args.extend([
-        # PyQt6相关
+        # PyQt6核心模块 - 只导入主要模块，让PyInstaller自动处理依赖
         '--hidden-import=PyQt6',
         '--hidden-import=PyQt6.QtWidgets',
         '--hidden-import=PyQt6.QtCore',
-        '--hidden-import=PyQt6.QtCore.QObject',
-        '--hidden-import=PyQt6.QtCore.pyqtSignal',
-        '--hidden-import=PyQt6.QtCore.QMetaObject',
-        '--hidden-import=PyQt6.QtCore.Qt',
-        '--hidden-import=PyQt6.QtCore.Q_ARG',
         '--hidden-import=PyQt6.QtGui',
-        # 其他依赖
+        '--hidden-import=PyQt6.QtNetwork',
+
+        # 其他必要依赖
         '--hidden-import=openpyxl',
         '--hidden-import=jinja2',
-        '--hidden-import=ipaddress',
-        '--hidden-import=re',
-        '--hidden-import=json',
-        '--hidden-import=subprocess',
-        '--hidden-import=threading',
-        '--hidden-import=asyncio',
+        '--hidden-import=netaddr',
         '--hidden-import=requests',
-        # 项目模块
-        '--hidden-import=src',
-        '--hidden-import=src.utils',
-        '--hidden-import=src.utils.ip_utils',
-        '--hidden-import=src.utils.text_utils',
-        '--hidden-import=src.utils.nat_parser',
-        '--hidden-import=src.utils.logger',
-        '--hidden-import=src.utils.async_utils',
-        '--hidden-import=src.gui',
-        '--hidden-import=src.gui.tabs',
+        '--hidden-import=scapy',
+        '--hidden-import=darkdetect',
+        '--hidden-import=qt_material',
+
+        # 项目核心模块
+        '--hidden-import=src.gui.main_window',
+        '--hidden-import=src.gui.styles',
         '--hidden-import=src.gui.tabs.__init__',
+
+        # 所有选项卡模块
         '--hidden-import=src.gui.tabs.subnet_calculator_tab',
         '--hidden-import=src.gui.tabs.ip_calculator_tab',
         '--hidden-import=src.gui.tabs.route_summary_tab',
@@ -340,6 +339,13 @@ def get_pyinstaller_args() -> List[str]:
         '--hidden-import=src.gui.tabs.nat_parser_tab',
         '--hidden-import=src.gui.tabs.vsr_config_tab',
         '--hidden-import=src.gui.tabs.network_analyzer_tab',
+
+        # 工具类模块
+        '--hidden-import=src.utils.ip_utils',
+        '--hidden-import=src.utils.text_utils',
+        '--hidden-import=src.utils.nat_parser',
+        '--hidden-import=src.utils.logger',
+        '--hidden-import=src.utils.async_utils',
     ])
 
     return args
