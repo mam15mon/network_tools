@@ -19,30 +19,76 @@ class TabLoader(QWidget):
         self.tab_class = tab_class
         self.tab_name = tab_name
         self.instance = None
+        self.is_loading = False
         self.setup_ui()
 
     def setup_ui(self):
         """设置UI"""
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout = QVBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # 添加加载提示
-        label = QLabel(f"正在加载 {self.tab_name}...")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(label)
+        self.loading_label = QLabel(f"点击加载 {self.tab_name}")
+        self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout.addWidget(self.loading_label)
+
+        # 添加点击事件
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event):
+        """鼠标点击事件"""
+        if not self.is_loading and self.instance is None:
+            self.start_loading()
+
+    def start_loading(self):
+        """开始加载选项卡"""
+        if self.is_loading or self.instance is not None:
+            return
+
+        self.is_loading = True
+        self.loading_label.setText(f"正在加载 {self.tab_name}...")
+
+        # 在单独的线程中加载选项卡
+        import threading
+        threading.Thread(target=self._load_tab_thread, daemon=True).start()
+
+    def _load_tab_thread(self):
+        """在后台线程中加载选项卡"""
+        try:
+            # 动态导入模块
+            from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
+            instance = self.tab_class()
+
+            # 在主线程中更新UI
+            QMetaObject.invokeMethod(self, "_update_ui",
+                                    Qt.ConnectionType.QueuedConnection,
+                                    Q_ARG(bool, True),
+                                    Q_ARG(object, instance))
+        except Exception as e:
+            # 在主线程中显示错误
+            from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
+            QMetaObject.invokeMethod(self, "_update_ui",
+                                    Qt.ConnectionType.QueuedConnection,
+                                    Q_ARG(bool, False),
+                                    Q_ARG(object, str(e)))
+
+    def _update_ui(self, success, result):
+        """在主线程中更新UI"""
+        if success:
+            self.instance = result
+            self.loaded.emit(self.instance)
+        else:
+            # 显示错误信息
+            self.loading_label.setText(f"加载失败: {result}")
+            print(f"加载选项卡失败: {result}")
+
+        self.is_loading = False
 
     def load_tab(self):
         """加载实际的选项卡"""
-        if self.instance is None:
-            # 动态导入模块
-            try:
-                self.instance = self.tab_class()
-                self.loaded.emit(self.instance)
-            except Exception as e:
-                # 加载失败时显示错误信息
-                layout = QVBoxLayout(self)
-                layout.addWidget(QLabel(f"加载失败: {str(e)}"))
-                print(f"加载选项卡失败: {str(e)}")
+        if self.instance is None and not self.is_loading:
+            self.start_loading()
         return self.instance
 
 
@@ -121,10 +167,6 @@ class NetworkToolGUI(QMainWindow):
             )
             self.tab_loaders.append(loader)
             self.tab_widget.addTab(loader, config["name"])
-
-        # 立即加载第一个选项卡
-        if self.tab_loaders:
-            self.load_tab(0)
 
     def load_tab_class(self, module_name, class_name):
         """动态加载选项卡类"""
