@@ -13,6 +13,9 @@ class TabLoader(QWidget):
 
     # 加载完成信号
     loaded = pyqtSignal(QWidget)
+    # 加载状态信号
+    loading_started = pyqtSignal()
+    loading_finished = pyqtSignal(bool, object)
 
     def __init__(self, tab_class, tab_name):
         super().__init__()
@@ -21,6 +24,10 @@ class TabLoader(QWidget):
         self.instance = None
         self.is_loading = False
         self.setup_ui()
+
+        # 连接信号
+        self.loading_started.connect(self._on_loading_started)
+        self.loading_finished.connect(self._on_loading_finished)
 
     def setup_ui(self):
         """设置UI"""
@@ -47,34 +54,22 @@ class TabLoader(QWidget):
             return
 
         self.is_loading = True
+        self.loading_started.emit()
+
+        # 直接在主线程中加载选项卡
+        try:
+            instance = self.tab_class()
+            self.loading_finished.emit(True, instance)
+        except Exception as e:
+            print(f"加载选项卡失败: {str(e)}")
+            self.loading_finished.emit(False, str(e))
+
+    def _on_loading_started(self):
+        """加载开始时的处理"""
         self.loading_label.setText(f"正在加载 {self.tab_name}...")
 
-        # 在单独的线程中加载选项卡
-        import threading
-        threading.Thread(target=self._load_tab_thread, daemon=True).start()
-
-    def _load_tab_thread(self):
-        """在后台线程中加载选项卡"""
-        try:
-            # 动态导入模块
-            from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
-            instance = self.tab_class()
-
-            # 在主线程中更新UI
-            QMetaObject.invokeMethod(self, "_update_ui",
-                                    Qt.ConnectionType.QueuedConnection,
-                                    Q_ARG(bool, True),
-                                    Q_ARG(object, instance))
-        except Exception as e:
-            # 在主线程中显示错误
-            from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
-            QMetaObject.invokeMethod(self, "_update_ui",
-                                    Qt.ConnectionType.QueuedConnection,
-                                    Q_ARG(bool, False),
-                                    Q_ARG(object, str(e)))
-
-    def _update_ui(self, success, result):
-        """在主线程中更新UI"""
+    def _on_loading_finished(self, success, result):
+        """加载完成时的处理"""
         if success:
             self.instance = result
             self.loaded.emit(self.instance)
