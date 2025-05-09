@@ -165,14 +165,30 @@ def install_requirements() -> None:
             print("❌ 错误: 没有PyInstaller无法继续构建")
             sys.exit(1)
 
-def setup_upx() -> bool:
-    """设置UPX压缩器"""
-    upx_dir = Path('upx')
+def setup_upx() -> str:
+    """设置UPX压缩器，返回UPX路径"""
+    # 首先检查系统中是否已安装UPX
+    try:
+        # 检查PATH中是否有UPX
+        upx_path = shutil.which('upx')
+        if upx_path:
+            print(f"✅ 系统中已安装UPX: {upx_path}")
+            return os.path.dirname(upx_path)
+    except Exception:
+        pass
 
-    # 如果UPX目录已存在，则认为已设置
+    # 检查本地目录
+    upx_dir = Path('upx')
     if upx_dir.exists() and (upx_dir / 'upx.exe').exists():
-        print("✅ UPX已设置")
-        return True
+        print(f"✅ 本地目录中已有UPX: {upx_dir.absolute()}")
+        return str(upx_dir.absolute())
+
+    # 如果系统中没有安装UPX，询问是否下载
+    print("⚠️ 系统中未找到UPX压缩器")
+    response = input("是否下载并安装UPX? (y/n): ")
+    if response.lower() != 'y':
+        print("⚠️ 跳过UPX安装，将不使用UPX压缩")
+        return ""
 
     print("⚙️ 正在设置UPX压缩器...")
 
@@ -180,7 +196,7 @@ def setup_upx() -> bool:
     upx_dir.mkdir(exist_ok=True)
 
     # UPX下载URL
-    upx_version = "4.2.1"
+    upx_version = "5.0.1"
     upx_url = f"https://github.com/upx/upx/releases/download/v{upx_version}/upx-{upx_version}-win64.zip"
 
     try:
@@ -209,10 +225,11 @@ def setup_upx() -> bool:
         zip_path.unlink()
 
         print("✅ UPX设置完成")
-        return True
+        return str(upx_dir.absolute())
     except Exception as e:
         print(f"❌ UPX设置失败: {str(e)}")
-        return False
+        print("⚠️ 将不使用UPX压缩")
+        return ""
 
 def verify_and_convert_icon() -> str:
     """验证图标文件并返回路径"""
@@ -231,6 +248,7 @@ def verify_and_convert_icon() -> str:
 
 def get_pyinstaller_args() -> List[str]:
     """获取 PyInstaller 参数列表"""
+    # 基本参数
     args = [
         'src/main.py',  # 主程序文件
         '--name=network_tools',  # 英文名称
@@ -240,16 +258,23 @@ def get_pyinstaller_args() -> List[str]:
         # '--onedir',  # 生成目录而不是单个文件，便于调试
         '--onefile',  # 生成单个exe文件
         '--log-level=INFO',  # 日志级别
-
-        # UPX压缩设置
-        '--upx-dir=upx',  # UPX目录
-        '--upx',  # 启用UPX压缩
-        '--upx-exclude=vcruntime140.dll',  # 排除特定文件不压缩
-        '--upx-exclude=python*.dll',
-        '--upx-exclude=ucrtbase.dll',
-        '--upx-exclude=VCRUNTIME140.dll',
-        '--upx-exclude=msvcp140.dll',
     ]
+
+    # 检查是否可以使用UPX
+    if shutil.which('upx') or os.path.exists('upx/upx.exe'):
+        # UPX压缩设置 - 注意：不使用--upx选项，因为它在新版本中可能有歧义
+        # 只要指定了--upx-dir，PyInstaller就会尝试使用UPX
+        args.extend([
+            '--upx-exclude=vcruntime140.dll',  # 排除特定文件不压缩
+            '--upx-exclude=python*.dll',
+            '--upx-exclude=ucrtbase.dll',
+            '--upx-exclude=VCRUNTIME140.dll',
+            '--upx-exclude=msvcp140.dll',
+        ])
+    else:
+        # 如果没有UPX，明确禁用它
+        args.append('--noupx')
+        print("⚠️ 未找到UPX，将不使用UPX压缩")
 
     # 添加图标
     icon_path = verify_and_convert_icon()
@@ -476,7 +501,7 @@ def build_exe() -> None:
         shutil.rmtree('release')
 
     # 设置UPX压缩器
-    setup_upx()
+    upx_dir = setup_upx()
 
     # 添加版本信息
     version_info = {
@@ -544,6 +569,17 @@ def build_exe() -> None:
         # 添加版本文件参数
         args = get_pyinstaller_args()
         args.append(f'--version-file={version_file}')
+
+        # 添加UPX参数
+        if upx_dir:
+            # 替换默认的UPX目录参数
+            for i, arg in enumerate(args):
+                if arg.startswith('--upx-dir='):
+                    args[i] = f'--upx-dir={upx_dir}'
+                    break
+            else:
+                # 如果没有找到--upx-dir参数，添加它
+                args.append(f'--upx-dir={upx_dir}')
 
         PyInstaller.__main__.run(args)
     except ImportError:
