@@ -188,7 +188,9 @@ def get_pyinstaller_args() -> List[str]:
         '--windowed',  # 无控制台窗口
         '--noconfirm',  # 覆盖现有文件
         '--clean',  # 清理临时文件
-        '--onefile',  # 生成单个exe文件
+        '--onedir',  # 生成目录而不是单个文件，便于调试
+        # '--onefile',  # 生成单个exe文件
+        '--log-level=DEBUG',  # 详细日志
     ]
 
     # 添加图标
@@ -206,6 +208,13 @@ def get_pyinstaller_args() -> List[str]:
     args.extend([
         '--collect-all=openpyxl',
         '--collect-all=jinja2',
+        '--collect-all=requests',
+    ])
+
+    # 添加调试选项
+    args.extend([
+        '--debug=imports',  # 调试导入问题
+        '--debug=bootloader',  # 调试启动加载器
     ])
 
     # 显式导入关键模块
@@ -214,6 +223,11 @@ def get_pyinstaller_args() -> List[str]:
         '--hidden-import=PyQt6',
         '--hidden-import=PyQt6.QtWidgets',
         '--hidden-import=PyQt6.QtCore',
+        '--hidden-import=PyQt6.QtCore.QObject',
+        '--hidden-import=PyQt6.QtCore.pyqtSignal',
+        '--hidden-import=PyQt6.QtCore.QMetaObject',
+        '--hidden-import=PyQt6.QtCore.Qt',
+        '--hidden-import=PyQt6.QtCore.Q_ARG',
         '--hidden-import=PyQt6.QtGui',
         # 其他依赖
         '--hidden-import=openpyxl',
@@ -224,12 +238,25 @@ def get_pyinstaller_args() -> List[str]:
         '--hidden-import=subprocess',
         '--hidden-import=threading',
         '--hidden-import=asyncio',
+        '--hidden-import=requests',
         # 项目模块
+        '--hidden-import=src',
+        '--hidden-import=src.utils',
         '--hidden-import=src.utils.ip_utils',
         '--hidden-import=src.utils.text_utils',
         '--hidden-import=src.utils.nat_parser',
         '--hidden-import=src.utils.logger',
         '--hidden-import=src.utils.async_utils',
+        '--hidden-import=src.gui',
+        '--hidden-import=src.gui.tabs',
+        '--hidden-import=src.gui.tabs.__init__',
+        '--hidden-import=src.gui.tabs.subnet_calculator_tab',
+        '--hidden-import=src.gui.tabs.ip_calculator_tab',
+        '--hidden-import=src.gui.tabs.route_summary_tab',
+        '--hidden-import=src.gui.tabs.mask_converter_tab',
+        '--hidden-import=src.gui.tabs.nat_parser_tab',
+        '--hidden-import=src.gui.tabs.vsr_config_tab',
+        '--hidden-import=src.gui.tabs.network_analyzer_tab',
     ])
 
     return args
@@ -239,12 +266,26 @@ def copy_to_release(exe_name: str) -> None:
     release_dir = Path('release')
     release_dir.mkdir(exist_ok=True)
 
-    src_path = Path('dist') / f"{exe_name}.exe"
+    # 检查是onedir还是onefile模式
+    src_exe_path = Path('dist') / f"{exe_name}.exe"
+    src_dir_path = Path('dist') / exe_name
 
-    if not src_path.exists():
-        raise FileNotFoundError(f"生成文件 {src_path} 不存在，请检查构建日志")
+    if src_exe_path.exists():
+        # onefile模式
+        print(f"复制单个可执行文件: {src_exe_path} -> {release_dir}")
+        shutil.copy2(src_exe_path, release_dir)
+    elif src_dir_path.exists():
+        # onedir模式
+        print(f"复制目录: {src_dir_path} -> {release_dir / exe_name}")
+        if (release_dir / exe_name).exists():
+            shutil.rmtree(release_dir / exe_name)
+        shutil.copytree(src_dir_path, release_dir / exe_name)
 
-    shutil.copy2(src_path, release_dir)
+        # 创建启动脚本
+        with open(release_dir / "启动网络工具.bat", "w") as f:
+            f.write(f"@echo off\ncd {exe_name}\n{exe_name}.exe\n")
+    else:
+        raise FileNotFoundError(f"生成的文件或目录不存在，请检查构建日志")
 
 def check_gh_cli() -> bool:
     """检查是否安装了GitHub CLI"""
@@ -297,11 +338,33 @@ def publish_to_github(version: str = None, title: str = None, notes: str = None,
     if not check_gh_cli():
         return False
 
-    # 确保release目录中有可执行文件
+    # 确保release目录中有可执行文件或目录
     exe_path = Path('release') / 'network_tools.exe'
-    if not exe_path.exists():
-        print("❌ 错误: 找不到要发布的可执行文件")
+    dir_path = Path('release') / 'network_tools'
+    bat_path = Path('release') / '启动网络工具.bat'
+
+    if not (exe_path.exists() or (dir_path.exists() and bat_path.exists())):
+        print("❌ 错误: 找不到要发布的可执行文件或目录")
         return False
+
+    # 如果是目录模式，创建ZIP文件
+    if dir_path.exists() and bat_path.exists():
+        import zipfile
+        zip_path = Path('release') / 'network_tools.zip'
+
+        print(f"创建ZIP文件: {zip_path}")
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # 添加启动脚本
+            zipf.write(bat_path, bat_path.name)
+
+            # 添加程序目录中的所有文件
+            for root, _, files in os.walk(dir_path):
+                for file in files:
+                    file_path = Path(root) / file
+                    zipf.write(file_path, file_path.relative_to(Path('release')))
+
+        # 使用ZIP文件作为发布文件
+        exe_path = zip_path
 
     try:
         # 获取所有标签
