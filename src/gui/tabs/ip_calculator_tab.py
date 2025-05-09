@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
 from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt
 import requests
-from . import get_public_ip
+from . import get_public_ip, IPFetcher
 from src.utils.async_utils import AsyncTaskManager
 from src.config import AppConfig
 from src.gui.styles import StyleManager
@@ -16,8 +16,19 @@ class IPCalculatorTab(QWidget):
         # 创建异步任务管理器
         self.task_manager = AsyncTaskManager()
         self.setup_ui()
-        # 设置默认公网IP
+
+        # 设置默认本地IP
         self.ip_query_input.setText(get_public_ip())
+
+        # 异步获取公网IP
+        self.ip_fetcher = IPFetcher()
+        self.ip_fetcher.ip_fetched.connect(self.update_ip)
+        self.ip_fetcher.fetch_async()
+
+    def update_ip(self, ip):
+        """更新IP地址"""
+        if ip and self.ip_query_input.text() == "192.168.1.1":
+            self.ip_query_input.setText(ip)
 
     def setup_ui(self):
         """设置UI界面"""

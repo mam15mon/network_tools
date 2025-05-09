@@ -165,6 +165,55 @@ def install_requirements() -> None:
             print("❌ 错误: 没有PyInstaller无法继续构建")
             sys.exit(1)
 
+def setup_upx() -> bool:
+    """设置UPX压缩器"""
+    upx_dir = Path('upx')
+
+    # 如果UPX目录已存在，则认为已设置
+    if upx_dir.exists() and (upx_dir / 'upx.exe').exists():
+        print("✅ UPX已设置")
+        return True
+
+    print("⚙️ 正在设置UPX压缩器...")
+
+    # 创建UPX目录
+    upx_dir.mkdir(exist_ok=True)
+
+    # UPX下载URL
+    upx_version = "4.2.1"
+    upx_url = f"https://github.com/upx/upx/releases/download/v{upx_version}/upx-{upx_version}-win64.zip"
+
+    try:
+        import urllib.request
+        import zipfile
+
+        # 下载UPX
+        print(f"📥 正在下载UPX {upx_version}...")
+        zip_path = upx_dir / "upx.zip"
+        urllib.request.urlretrieve(upx_url, zip_path)
+
+        # 解压UPX
+        print("📦 正在解压UPX...")
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            for file in zip_ref.namelist():
+                if file.endswith('.exe') or file.endswith('.txt'):
+                    # 提取文件名
+                    filename = os.path.basename(file)
+                    # 解压到UPX目录
+                    source = zip_ref.open(file)
+                    target = open(upx_dir / filename, "wb")
+                    with source, target:
+                        shutil.copyfileobj(source, target)
+
+        # 删除下载的ZIP文件
+        zip_path.unlink()
+
+        print("✅ UPX设置完成")
+        return True
+    except Exception as e:
+        print(f"❌ UPX设置失败: {str(e)}")
+        return False
+
 def verify_and_convert_icon() -> str:
     """验证图标文件并返回路径"""
     # 检查resources/icons目录中的图标
@@ -188,9 +237,18 @@ def get_pyinstaller_args() -> List[str]:
         '--windowed',  # 无控制台窗口
         '--noconfirm',  # 覆盖现有文件
         '--clean',  # 清理临时文件
-        '--onedir',  # 生成目录而不是单个文件，便于调试
-        # '--onefile',  # 生成单个exe文件
-        '--log-level=DEBUG',  # 详细日志
+        # '--onedir',  # 生成目录而不是单个文件，便于调试
+        '--onefile',  # 生成单个exe文件
+        '--log-level=INFO',  # 日志级别
+
+        # UPX压缩设置
+        '--upx-dir=upx',  # UPX目录
+        '--upx',  # 启用UPX压缩
+        '--upx-exclude=vcruntime140.dll',  # 排除特定文件不压缩
+        '--upx-exclude=python*.dll',
+        '--upx-exclude=ucrtbase.dll',
+        '--upx-exclude=VCRUNTIME140.dll',
+        '--upx-exclude=msvcp140.dll',
     ]
 
     # 添加图标
@@ -266,26 +324,14 @@ def copy_to_release(exe_name: str) -> None:
     release_dir = Path('release')
     release_dir.mkdir(exist_ok=True)
 
-    # 检查是onedir还是onefile模式
+    # 单文件模式
     src_exe_path = Path('dist') / f"{exe_name}.exe"
-    src_dir_path = Path('dist') / exe_name
 
     if src_exe_path.exists():
-        # onefile模式
-        print(f"复制单个可执行文件: {src_exe_path} -> {release_dir}")
+        print(f"复制可执行文件: {src_exe_path} -> {release_dir}")
         shutil.copy2(src_exe_path, release_dir)
-    elif src_dir_path.exists():
-        # onedir模式
-        print(f"复制目录: {src_dir_path} -> {release_dir / exe_name}")
-        if (release_dir / exe_name).exists():
-            shutil.rmtree(release_dir / exe_name)
-        shutil.copytree(src_dir_path, release_dir / exe_name)
-
-        # 创建启动脚本
-        with open(release_dir / "启动网络工具.bat", "w") as f:
-            f.write(f"@echo off\ncd {exe_name}\n{exe_name}.exe\n")
     else:
-        raise FileNotFoundError(f"生成的文件或目录不存在，请检查构建日志")
+        raise FileNotFoundError(f"生成文件 {src_exe_path} 不存在，请检查构建日志")
 
 def check_gh_cli() -> bool:
     """检查是否安装了GitHub CLI"""
@@ -338,33 +384,12 @@ def publish_to_github(version: str = None, title: str = None, notes: str = None,
     if not check_gh_cli():
         return False
 
-    # 确保release目录中有可执行文件或目录
+    # 确保release目录中有可执行文件
     exe_path = Path('release') / 'network_tools.exe'
-    dir_path = Path('release') / 'network_tools'
-    bat_path = Path('release') / '启动网络工具.bat'
 
-    if not (exe_path.exists() or (dir_path.exists() and bat_path.exists())):
-        print("❌ 错误: 找不到要发布的可执行文件或目录")
+    if not exe_path.exists():
+        print("❌ 错误: 找不到要发布的可执行文件")
         return False
-
-    # 如果是目录模式，创建ZIP文件
-    if dir_path.exists() and bat_path.exists():
-        import zipfile
-        zip_path = Path('release') / 'network_tools.zip'
-
-        print(f"创建ZIP文件: {zip_path}")
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # 添加启动脚本
-            zipf.write(bat_path, bat_path.name)
-
-            # 添加程序目录中的所有文件
-            for root, _, files in os.walk(dir_path):
-                for file in files:
-                    file_path = Path(root) / file
-                    zipf.write(file_path, file_path.relative_to(Path('release')))
-
-        # 使用ZIP文件作为发布文件
-        exe_path = zip_path
 
     try:
         # 获取所有标签
@@ -450,14 +475,84 @@ def build_exe() -> None:
     if os.path.exists('release'):
         shutil.rmtree('release')
 
+    # 设置UPX压缩器
+    setup_upx()
+
+    # 添加版本信息
+    version_info = {
+        'version': '1.0.0',
+        'company_name': 'Network Tools',
+        'file_description': '网络工具集',
+        'internal_name': 'network_tools',
+        'legal_copyright': 'Copyright (c) 2025',
+        'original_filename': 'network_tools.exe',
+        'product_name': '网络工具集',
+    }
+
+    # 创建版本文件
+    version_file = 'version_info.txt'
+    with open(version_file, 'w', encoding='utf-8') as f:
+        f.write('# UTF-8\n')
+        f.write('#\n')
+        f.write('# For more details about fixed file info \'ffi\' see:\n')
+        f.write('# http://msdn.microsoft.com/en-us/library/ms646997.aspx\n')
+        f.write('VSVersionInfo(\n')
+        f.write('  ffi=FixedFileInfo(\n')
+        f.write('    # filevers and prodvers should be always a tuple with four items: (1, 2, 3, 4)\n')
+        f.write('    # Set not needed items to zero 0.\n')
+        f.write('    filevers=(1, 0, 0, 0),\n')
+        f.write('    prodvers=(1, 0, 0, 0),\n')
+        f.write('    # Contains a bitmask that specifies the valid bits \'flags\'\n')
+        f.write('    mask=0x3f,\n')
+        f.write('    # Contains a bitmask that specifies the Boolean attributes of the file.\n')
+        f.write('    flags=0x0,\n')
+        f.write('    # The operating system for which this file was designed.\n')
+        f.write('    # 0x4 - NT and there is no need to change it.\n')
+        f.write('    OS=0x40004,\n')
+        f.write('    # The general type of file.\n')
+        f.write('    # 0x1 - the file is an application.\n')
+        f.write('    fileType=0x1,\n')
+        f.write('    # The function of the file.\n')
+        f.write('    # 0x0 - the function is not defined for this fileType\n')
+        f.write('    subtype=0x0,\n')
+        f.write('    # Creation date and time stamp.\n')
+        f.write('    date=(0, 0)\n')
+        f.write('    ),\n')
+        f.write('  kids=[\n')
+        f.write('    StringFileInfo(\n')
+        f.write('      [\n')
+        f.write('      StringTable(\n')
+        f.write('        u\'080404b0\',\n')
+        f.write('        [StringStruct(u\'CompanyName\', u\'{}\'),\n'.format(version_info['company_name']))
+        f.write('        StringStruct(u\'FileDescription\', u\'{}\'),\n'.format(version_info['file_description']))
+        f.write('        StringStruct(u\'FileVersion\', u\'{}\'),\n'.format(version_info['version']))
+        f.write('        StringStruct(u\'InternalName\', u\'{}\'),\n'.format(version_info['internal_name']))
+        f.write('        StringStruct(u\'LegalCopyright\', u\'{}\'),\n'.format(version_info['legal_copyright']))
+        f.write('        StringStruct(u\'OriginalFilename\', u\'{}\'),\n'.format(version_info['original_filename']))
+        f.write('        StringStruct(u\'ProductName\', u\'{}\'),\n'.format(version_info['product_name']))
+        f.write('        StringStruct(u\'ProductVersion\', u\'{}\')])\n'.format(version_info['version']))
+        f.write('      ]),\n')
+        f.write('    VarFileInfo([VarStruct(u\'Translation\', [2052, 1200])])\n')
+        f.write('  ]\n')
+        f.write(')\n')
+
     # 运行 PyInstaller
     try:
         # pylint: disable=import-outside-toplevel
         import PyInstaller.__main__
-        PyInstaller.__main__.run(get_pyinstaller_args())
+
+        # 添加版本文件参数
+        args = get_pyinstaller_args()
+        args.append(f'--version-file={version_file}')
+
+        PyInstaller.__main__.run(args)
     except ImportError:
         print("错误: 未能导入 PyInstaller，请确保已正确安装")
         sys.exit(1)
+    finally:
+        # 清理版本文件
+        if os.path.exists(version_file):
+            os.remove(version_file)
 
     # 复制到发布目录
     copy_to_release('network_tools')
