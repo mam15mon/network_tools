@@ -1,6 +1,7 @@
 import re
 import threading
 from PyQt6.QtCore import QObject, pyqtSignal, QUrl
+from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
 class IPFetcher(QObject):
     """异步获取IP的类"""
@@ -27,9 +28,6 @@ class IPFetcher(QObject):
     def _get_ip_safe(self):
         """安全地获取IP"""
         try:
-            from PyQt6.QtCore import QThread, QObject
-            from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-
             # 使用Qt的网络API而不是requests
             self.manager = QNetworkAccessManager()
             self.manager.finished.connect(self._handle_response)
