@@ -134,22 +134,69 @@ class NATParser:
     @staticmethod
     def parse_h3c_command(command: str) -> Optional[Dict]:
         """解析H3C NAT Server命令"""
-        pattern = r'nat server( protocol (\w+))? global (\S+)( (\d+))? inside (\S+)( (\d+))?( acl \d+)?( vrrp (\d+))? rule (\S+)( description (.+))?'
-        match = re.match(pattern, command)
+        # 尝试多种模式匹配
+        result = None
 
-        if match:
-            return {
-                'protocol': match.group(2) if match.group(2) else 'any',
-                'global_ip': match.group(3),
-                'global_port': match.group(5) if match.group(5) else 'any',
-                'inside_ip': match.group(6),
-                'inside_port': match.group(8) if match.group(8) else 'any',
-                'vrrp': match.group(11) if match.group(11) else '-',
-                'rule': match.group(12),
-                'description': match.group(14) if match.group(14) else '-',
-                'command': command
-            }
-        return None
+        # 提取命令中的关键参数
+        protocol_match = re.search(r'protocol\s+(\S+)', command)
+        protocol = protocol_match.group(1) if protocol_match else 'any'
+
+        global_ip_match = re.search(r'global\s+(\S+)', command)
+        global_ip = global_ip_match.group(1) if global_ip_match else None
+
+        inside_ip_match = re.search(r'inside\s+(\S+)', command)
+        inside_ip = inside_ip_match.group(1) if inside_ip_match else None
+
+        rule_match = re.search(r'rule\s+(\S+)', command)
+        rule = rule_match.group(1) if rule_match else '-'
+
+        description_match = re.search(r'description\s+(.+?)(?:\s+counting|\s+reversible|$)', command)
+        description = description_match.group(1) if description_match else '-'
+
+        vrrp_match = re.search(r'vrrp\s+(\d+)', command)
+        vrrp = vrrp_match.group(1) if vrrp_match else '-'
+
+        # 如果缺少必要的参数，返回None
+        if not global_ip or not inside_ip:
+            return None
+
+        # 提取端口信息
+        # 模式1: 单端口
+        global_port = 'any'
+        inside_port = 'any'
+
+        # 检查是否有端口信息
+        if protocol != 'any':
+            # 尝试匹配双端口格式
+            double_port_match = re.search(r'global\s+\S+\s+(\d+)\s+(\d+)\s+inside\s+\S+\s+(\d+)\s+(\d+)', command)
+            if double_port_match:
+                global_port_start = double_port_match.group(1)
+                global_port_end = double_port_match.group(2)
+                inside_port_start = double_port_match.group(3)
+                inside_port_end = double_port_match.group(4)
+                global_port = f"{global_port_start}-{global_port_end}"
+                inside_port = f"{inside_port_start}-{inside_port_end}"
+            else:
+                # 尝试匹配单端口格式
+                single_port_match = re.search(r'global\s+\S+\s+(\d+)\s+inside\s+\S+\s+(\d+)', command)
+                if single_port_match:
+                    global_port = single_port_match.group(1)
+                    inside_port = single_port_match.group(2)
+
+        # 构建结果
+        result = {
+            'protocol': protocol,
+            'global_ip': global_ip,
+            'global_port': global_port,
+            'inside_ip': inside_ip,
+            'inside_port': inside_port,
+            'vrrp': vrrp,
+            'rule': rule,
+            'description': description,
+            'command': command
+        }
+
+        return result
 
     @staticmethod
     def parse_config(text: str, device_type: str) -> tuple[list, list]:

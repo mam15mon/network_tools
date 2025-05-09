@@ -44,3 +44,9 @@ Thumbs.db
 # 项目特定忽略
 export/
 *.log
+
+# 构建文件
+dist/
+build/
+*.spec
+release/
